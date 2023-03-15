@@ -7,7 +7,18 @@ import torch
 import torch.nn as nn
 from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+import pandas as pd
+import random
+import torch.nn as nn
+from sentence_transformers import SentenceTransformer, InputExample, losses, models, datasets, evaluation
+import os
 
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+def set_seed(seed):
+  random.seed(seed)
+  np.random.seed(seed)
+  torch.manual_seed(seed)
 
 def main():
 
@@ -45,9 +56,37 @@ def main():
 
     eval_it_pool = np.arange(0, args.Iteration+1, 500).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
-    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
+    # channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
 
+    # print(dst_train)
+    train_df = pd.read_csv('https://github.com/clairett/pytorch-sentiment-classification/raw/master/data/SST2/train.tsv', delimiter='\t', header=None)
+    # Load the test dataset into a pandas dataframe.
+    eval_df = pd.read_csv('https://github.com/clairett/pytorch-sentiment-classification/raw/master/data/SST2/test.tsv', delimiter='\t', header=None)
+
+    num_classes_text = 2
+    text_col=train_df.columns.values[0] 
+    category_col=train_df.columns.values[1]
+
+    x_eval = eval_df[text_col].values.tolist()
+    y_eval = eval_df[category_col].values.tolist()
+
+    st_model = 'paraphrase-mpnet-base-v2' #@param ['paraphrase-mpnet-base-v2', 'all-mpnet-base-v1', 'all-mpnet-base-v2', 'stsb-mpnet-base-v2', 'all-MiniLM-L12-v2', 'paraphrase-albert-small-v2', 'all-roberta-large-v1']
+    num_training = 64 #@param ["8", "16", "32", "54", "128", "256", "512"] {type:"raw"}
+
+    set_seed(0)
+    train_df_sample = pd.concat([train_df[train_df[1]==0].sample(num_training), train_df[train_df[1]==1].sample(num_training)])
+    x_train = train_df_sample[text_col].values.tolist()
+    y_train = train_df_sample[category_col].values.tolist()
+
+    orig_model = SentenceTransformer(st_model)
+
+    X_train_noFT = torch.tensor(orig_model.encode(x_train)).to(args.device)
+    X_eval_noFT = orig_model.encode(x_eval)
+    # print(X_train_noFT.shape)
+    # exit(0)
+    valset = TensorDataset(torch.Tensor(X_eval_noFT),torch.Tensor(y_eval)) # create your datset
+    valloader = torch.utils.data.DataLoader(valset, batch_size=16, num_workers=2)
 
     accs_all_exps = dict() # record performances of all experiments
     for key in model_eval_pool:
@@ -62,48 +101,70 @@ def main():
         print('Evaluation model pool: ', model_eval_pool)
 
         ''' organize the real dataset '''
-        images_all = []
-        labels_all = []
-        indices_class = [[] for c in range(num_classes)]
+        # images_all = []
+        # labels_all = []
+        # indices_class = [[] for c in range(num_classes)]
 
-        images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
-        labels_all = [dst_train[i][1] for i in range(len(dst_train))]
-        for i, lab in enumerate(labels_all):
-            indices_class[lab].append(i)
-        images_all = torch.cat(images_all, dim=0).to(args.device)
-        labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
+        # print('Here now')
+        # images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
+        # print('Here now 2')
+        # print(images_all[0].shape, dst_train[4][1], type(dst_train[0]))
+        # exit()
+        # labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+        # for i, lab in enumerate(labels_all):
+        #     indices_class[lab].append(i)
+        # images_all = torch.cat(images_all, dim=0).to(args.device)
+        # labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
 
-        for c in range(num_classes):
-            print('class c = %d: %d real images'%(c, len(indices_class[c])))
+        # print(images_all.shape)
+        # exit()
+        # for c in range(num_classes):
+        #     print('class c = %d: %d real images'%(c, len(indices_class[c])))
 
-        def get_images(c, n): # get random n images from class c
-            idx_shuffle = np.random.permutation(indices_class[c])[:n]
-            return images_all[idx_shuffle]
+        # def get_images(c, n): # get random n images from class c
+        #     idx_shuffle = np.random.permutation(indices_class[c])[:n]
+        #     return images_all[idx_shuffle]
 
-        for ch in range(channel):
-            print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
+        # for ch in range(channel):
+        #     print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
 
 
         ''' initialize the synthetic data '''
-        image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
-        label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        # image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
+        # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
 
-        if args.init == 'real':
-            print('initialize synthetic data from random real images')
-            for c in range(num_classes):
-                image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
-        else:
-            print('initialize synthetic data from random noise')
+        text_syn = torch.randn(size=(num_classes_text*args.ipc, 768), dtype=torch.float, requires_grad=True, device=args.device)
+        label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.float, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        # if args.init == 'real':
+        #     print('initialize synthetic data from random real images')
+        #     for c in range(num_classes):
+        #         image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
+        # else:
+        #     print('initialize synthetic data from random noise')
+        indices_class = [[] for c in range(num_classes_text)]
+        labels_all = y_train
+        for i, lab in enumerate(labels_all):
+            indices_class[lab].append(i)
 
+        # print(X_train_noFT.shape)
+        # exit()
+        def get_sentences(c, n):
+            idx_shuffle = np.random.permutation(indices_class[c])[:n]
+            return X_train_noFT[idx_shuffle]
 
         ''' training '''
-        optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
-        optimizer_img.zero_grad()
-        criterion = nn.CrossEntropyLoss().to(args.device)
+        # optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
+        # optimizer_img.zero_grad()
+
+        optimizer_text = torch.optim.SGD([text_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
+        optimizer_text.zero_grad()
+        # criterion = nn.CrossEntropyLoss().to(args.device)
+        criterion = nn.BCELoss().to(args.device)
         print('%s training begins'%get_time())
 
         for it in range(args.Iteration+1):
 
+            print(it, eval_it_pool,args.Iteration,'----------------')
             ''' Evaluate synthetic data '''
             if it in eval_it_pool:
                 for model_eval in model_eval_pool:
@@ -124,34 +185,39 @@ def main():
 
                     accs = []
                     for it_eval in range(args.num_eval):
-                        net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
-                        image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
-                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
+                        net_eval = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, 1),nn.Sigmoid())
+                        # net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
+                        # image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
+                        text_syn_eval, label_text_syn_eval = copy.deepcopy(text_syn.detach()), copy.deepcopy(label_text_syn.detach()) # avoid any unaware modification
+                        # _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args)
+                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, text_syn_eval, label_text_syn_eval, valloader, args)
                         accs.append(acc_test)
                     print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
 
                     if it == args.Iteration: # record the final results
+                        print('Did I come here?')
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
-                image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
-                for ch in range(channel):
-                    image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
-                image_syn_vis[image_syn_vis<0] = 0.0
-                image_syn_vis[image_syn_vis>1] = 1.0
-                save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
+                # save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+                # image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
+                # for ch in range(channel):
+                #     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
+                # image_syn_vis[image_syn_vis<0] = 0.0
+                # image_syn_vis[image_syn_vis>1] = 1.0
+                # save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
 
 
             ''' Train synthetic data '''
-            net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
+            net = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, 1),nn.Sigmoid()).to(args.device)
+            # net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
             net.train()
             net_parameters = list(net.parameters())
             optimizer_net = torch.optim.SGD(net.parameters(), lr=args.lr_net)  # optimizer_img for synthetic data
             optimizer_net.zero_grad()
             loss_avg = 0
             args.dc_aug_param = None  # Mute the DC augmentation when learning synthetic data (in inner-loop epoch function) in oder to be consistent with DC paper.
-
+            # exit(0)
 
             for ol in range(args.outer_loop):
 
@@ -160,47 +226,64 @@ def main():
                 # So, we calculate and freeze mu and sigma for BatchNorm layer with real data batch ahead.
                 # This would make the training with BatchNorm layers easier.
 
-                BN_flag = False
-                BNSizePC = 16  # for batch normalization
-                for module in net.modules():
-                    if 'BatchNorm' in module._get_name(): #BatchNorm
-                        BN_flag = True
-                if BN_flag:
-                    img_real = torch.cat([get_images(c, BNSizePC) for c in range(num_classes)], dim=0)
-                    net.train() # for updating the mu, sigma of BatchNorm
-                    output_real = net(img_real) # get running mu, sigma
-                    for module in net.modules():
-                        if 'BatchNorm' in module._get_name():  #BatchNorm
-                            module.eval() # fix mu and sigma of every BatchNorm layer
+                # BN_flag = False
+                # BNSizePC = 16  # for batch normalization
+                # for module in net.modules():
+                #     if 'BatchNorm' in module._get_name(): #BatchNorm
+                #         BN_flag = True
+                # if BN_flag:
+                #     img_real = torch.cat([get_images(c, BNSizePC) for c in range(num_classes)], dim=0)
+                #     net.train() # for updating the mu, sigma of BatchNorm
+                #     output_real = net(img_real) # get running mu, sigma
+                #     for module in net.modules():
+                #         if 'BatchNorm' in module._get_name():  #BatchNorm
+                #             module.eval() # fix mu and sigma of every BatchNorm layer
 
 
                 ''' update synthetic data '''
                 loss = torch.tensor(0.0).to(args.device)
-                for c in range(num_classes):
-                    img_real = get_images(c, args.batch_real)
-                    lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
-                    img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
-                    lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
+                for c in range(num_classes_text):
+                # for c in range(num_classes):
+                    # img_real = get_images(c, args.batch_real)
+                    # lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
+                    # img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
+                    # lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
+                    txt_real = get_sentences(c, args.batch_real)
+                    lab_txt_real = torch.ones((txt_real.shape[0],), device=args.device, dtype=torch.float) * c
+                    txt_syn = text_syn[c*args.ipc:(c+1)*args.ipc]
+                    lab_txt_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.float) * c
 
-                    if args.dsa:
-                        seed = int(time.time() * 1000) % 100000
-                        img_real = DiffAugment(img_real, args.dsa_strategy, seed=seed, param=args.dsa_param)
-                        img_syn = DiffAugment(img_syn, args.dsa_strategy, seed=seed, param=args.dsa_param)
+                    # if args.dsa:
+                    #     seed = int(time.time() * 1000) % 100000
+                    #     img_real = DiffAugment(img_real, args.dsa_strategy, seed=seed, param=args.dsa_param)
+                    #     img_syn = DiffAugment(img_syn, args.dsa_strategy, seed=seed, param=args.dsa_param)
 
-                    output_real = net(img_real)
-                    loss_real = criterion(output_real, lab_real)
+                    # output_real = net(img_real)
+                    output_real = net(txt_real)
+                    # loss_real = criterion(output_real, lab_real)
+                    # loss_real = criterion(output_real, lab_txt_real)
+                    # print(output_real.shape, lab_txt_real.shape,torch.reshape(lab_txt_real,output_real.shape).shape)
+                    # exit()
+                    loss_real = criterion(output_real, torch.reshape(lab_txt_real,output_real.shape))
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
 
-                    output_syn = net(img_syn)
-                    loss_syn = criterion(output_syn, lab_syn)
+                    # output_syn = net(img_syn)
+                    output_syn = net(txt_syn)
+                    # loss_syn = criterion(output_syn, lab_syn)
+                    # loss_syn = criterion(output_syn, lab_txt_syn)
+                    loss_syn = criterion(output_syn, torch.reshape(lab_txt_syn,output_syn.shape))
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
 
                     loss += match_loss(gw_syn, gw_real, args)
 
-                optimizer_img.zero_grad()
+                # optimizer_img.zero_grad()
+                # loss.backward()
+                # optimizer_img.step()
+                # loss_avg += loss.item()
+                optimizer_text.zero_grad()
                 loss.backward()
-                optimizer_img.step()
+                optimizer_text.step()
                 loss_avg += loss.item()
 
                 if ol == args.outer_loop - 1:
@@ -208,26 +291,32 @@ def main():
 
 
                 ''' update network '''
-                image_syn_train, label_syn_train = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())  # avoid any unaware modification
-                dst_syn_train = TensorDataset(image_syn_train, label_syn_train)
+                # image_syn_train, label_syn_train = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())  # avoid any unaware modification
+                text_syn_train, label_text_syn_train = copy.deepcopy(text_syn.detach()), copy.deepcopy(label_text_syn.detach())  # avoid any unaware modification
+                # dst_syn_train = TensorDataset(image_syn_train, label_syn_train)
+                dst_syn_train = TensorDataset(text_syn_train, label_text_syn_train)
                 trainloader = torch.utils.data.DataLoader(dst_syn_train, batch_size=args.batch_train, shuffle=True, num_workers=0)
                 for il in range(args.inner_loop):
                     epoch('train', trainloader, net, optimizer_net, criterion, args, aug = True if args.dsa else False)
 
 
-            loss_avg /= (num_classes*args.outer_loop)
+            # loss_avg /= (num_classes*args.outer_loop)
+            loss_avg /= (num_classes_text*args.outer_loop)
 
             if it%10 == 0:
                 print('%s iter = %04d, loss = %.4f' % (get_time(), it, loss_avg))
 
             if it == args.Iteration: # only record the final results
-                data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                # data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
+                # torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                data_save.append([copy.deepcopy(text_syn.detach().cpu()), copy.deepcopy(label_text_syn.detach().cpu())])
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'text_res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
-    print('\n==================== Final Results ====================\n')
+    # print('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
         accs = accs_all_exps[key]
+        # print(accs_all_exps)
         print('Run %d experiments, train on %s, evaluate %d random %s, mean  = %.2f%%  std = %.2f%%'%(args.num_exp, args.model, len(accs), key, np.mean(accs)*100, np.std(accs)*100))
 
 

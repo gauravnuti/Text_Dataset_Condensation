@@ -311,12 +311,16 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
                 img = DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
             else:
                 img = augment(img, args.dc_aug_param, device=args.device)
-        lab = datum[1].long().to(args.device)
+        # lab = datum[1].long().to(args.device)
+        lab = datum[1].to(args.device)
         n_b = lab.shape[0]
 
         output = net(img)
-        loss = criterion(output, lab)
-        acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
+        # loss = criterion(output, lab)
+        # print(output.dtype,lab.dtype)
+        loss = criterion(output, torch.reshape(lab,output.shape))
+        # acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
+        acc = (torch.reshape(output,lab.shape) == lab).sum().item()
 
         loss_avg += loss.item()*n_b
         acc_avg += acc
@@ -336,13 +340,15 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
 
 def evaluate_synset(it_eval, net, images_train, labels_train, testloader, args):
     net = net.to(args.device)
+    # print('--------------------------', labels_train.dtype)
     images_train = images_train.to(args.device)
     labels_train = labels_train.to(args.device)
     lr = float(args.lr_net)
     Epoch = int(args.epoch_eval_train)
     lr_schedule = [Epoch//2+1]
     optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)
-    criterion = nn.CrossEntropyLoss().to(args.device)
+    # criterion = nn.CrossEntropyLoss().to(args.device)
+    criterion = nn.BCELoss().to(args.device)
 
     dst_train = TensorDataset(images_train, labels_train)
     trainloader = torch.utils.data.DataLoader(dst_train, batch_size=args.batch_train, shuffle=True, num_workers=0)
