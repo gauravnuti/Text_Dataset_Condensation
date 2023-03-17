@@ -320,7 +320,9 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
         # print(output.dtype,lab.dtype)
         loss = criterion(output, torch.reshape(lab,output.shape))
         # acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
-        acc = (torch.reshape(output,lab.shape) == lab).sum().item()
+        threshold = torch.tensor([0.5])
+        predicted = (output>threshold).float()*1
+        acc = (torch.reshape(predicted,lab.shape) == lab).sum().item()
 
         loss_avg += loss.item()*n_b
         acc_avg += acc

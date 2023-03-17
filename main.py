@@ -165,7 +165,7 @@ def main():
 
         for it in range(args.Iteration+1):
 
-            print(it, eval_it_pool,args.Iteration,'----------------')
+            # print(it, eval_it_pool,args.Iteration,'----------------')
             ''' Evaluate synthetic data '''
             if it in eval_it_pool:
                 for model_eval in model_eval_pool:
@@ -196,7 +196,7 @@ def main():
                     print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
 
                     if it == args.Iteration: # record the final results
-                        print('Did I come here?')
+                        # print('Did I come here?')
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
@@ -314,7 +314,7 @@ def main():
                 torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'text_res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
-    # print('\n==================== Final Results ====================\n')
+    print('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
         accs = accs_all_exps[key]
         # print(accs_all_exps)
