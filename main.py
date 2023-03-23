@@ -135,7 +135,8 @@ def main():
         # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
 
         text_syn = torch.randn(size=(num_classes_text*args.ipc, 768), dtype=torch.float, requires_grad=True, device=args.device)
-        label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.float, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        # label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.float, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
         # if args.init == 'real':
         #     print('initialize synthetic data from random real images')
         #     for c in range(num_classes):
@@ -159,8 +160,8 @@ def main():
 
         optimizer_text = torch.optim.SGD([text_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_text.zero_grad()
-        # criterion = nn.CrossEntropyLoss().to(args.device)
-        criterion = nn.BCELoss().to(args.device)
+        criterion = nn.CrossEntropyLoss().to(args.device)
+        # criterion = nn.BCELoss().to(args.device)
         print('%s training begins'%get_time())
 
         for it in range(args.Iteration+1):
@@ -186,7 +187,7 @@ def main():
 
                     accs = []
                     for it_eval in range(args.num_eval):
-                        net_eval = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, 1),nn.Sigmoid())
+                        net_eval = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, num_classes_text))
                         # net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
                         # image_syn_eval, label_syn_eval = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach()) # avoid any unaware modification
                         text_syn_eval, label_text_syn_eval = copy.deepcopy(text_syn.detach()), copy.deepcopy(label_text_syn.detach()) # avoid any unaware modification
@@ -210,7 +211,7 @@ def main():
 
 
             ''' Train synthetic data '''
-            net = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, 1),nn.Sigmoid()).to(args.device)
+            net = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, num_classes_text)).to(args.device)
             # net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
             net.train()
             net_parameters = list(net.parameters())
@@ -250,9 +251,11 @@ def main():
                     # img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
                     # lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
                     txt_real = get_sentences(c, args.batch_real)
-                    lab_txt_real = torch.ones((txt_real.shape[0],), device=args.device, dtype=torch.float) * c
+                    # lab_txt_real = torch.ones((txt_real.shape[0],), device=args.device, dtype=torch.float) * c
+                    lab_txt_real = torch.ones((txt_real.shape[0],), device=args.device, dtype=torch.long) * c
                     txt_syn = text_syn[c*args.ipc:(c+1)*args.ipc]
-                    lab_txt_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.float) * c
+                    # lab_txt_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.float) * c
+                    lab_txt_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
 
                     # if args.dsa:
                     #     seed = int(time.time() * 1000) % 100000
@@ -265,15 +268,16 @@ def main():
                     # loss_real = criterion(output_real, lab_txt_real)
                     # print(output_real.shape, lab_txt_real.shape,torch.reshape(lab_txt_real,output_real.shape).shape)
                     # exit()
-                    loss_real = criterion(output_real, torch.reshape(lab_txt_real,output_real.shape))
+                    # loss_real = criterion(output_real, torch.reshape(lab_txt_real,output_real.shape))
+                    loss_real = criterion(output_real, lab_txt_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
 
                     # output_syn = net(img_syn)
                     output_syn = net(txt_syn)
                     # loss_syn = criterion(output_syn, lab_syn)
-                    # loss_syn = criterion(output_syn, lab_txt_syn)
-                    loss_syn = criterion(output_syn, torch.reshape(lab_txt_syn,output_syn.shape))
+                    loss_syn = criterion(output_syn, lab_txt_syn)
+                    # loss_syn = criterion(output_syn, torch.reshape(lab_txt_syn,output_syn.shape))
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
 
                     loss += match_loss(gw_syn, gw_real, args)

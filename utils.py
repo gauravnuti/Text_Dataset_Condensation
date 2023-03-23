@@ -311,18 +311,18 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
                 img = DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
             else:
                 img = augment(img, args.dc_aug_param, device=args.device)
-        # lab = datum[1].long().to(args.device)
-        lab = datum[1].to(args.device)
+        lab = datum[1].long().to(args.device) #Comment for BCE
+        # lab = datum[1].to(args.device) #Uncomment for BCE
         n_b = lab.shape[0]
 
         output = net(img)
-        # loss = criterion(output, lab)
+        loss = criterion(output, lab)
         # print(output.dtype,lab.dtype)
-        loss = criterion(output, torch.reshape(lab,output.shape))
-        # acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
-        threshold = torch.tensor([0.5])
-        predicted = (output>threshold).float()*1
-        acc = (torch.reshape(predicted,lab.shape) == lab).sum().item()
+        # loss = criterion(output, torch.reshape(lab,output.shape))
+        acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
+        # threshold = torch.tensor([0.5])
+        # predicted = (output>threshold).float()*1
+        # acc = (torch.reshape(predicted,lab.shape) == lab).sum().item()
 
         loss_avg += loss.item()*n_b
         acc_avg += acc
@@ -349,8 +349,8 @@ def evaluate_synset(it_eval, net, images_train, labels_train, testloader, args):
     Epoch = int(args.epoch_eval_train)
     lr_schedule = [Epoch//2+1]
     optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)
-    # criterion = nn.CrossEntropyLoss().to(args.device)
-    criterion = nn.BCELoss().to(args.device)
+    criterion = nn.CrossEntropyLoss().to(args.device)
+    # criterion = nn.BCELoss().to(args.device)
 
     dst_train = TensorDataset(images_train, labels_train)
     trainloader = torch.utils.data.DataLoader(dst_train, batch_size=args.batch_train, shuffle=True, num_workers=0)
