@@ -80,8 +80,8 @@ def main():
     num_training = 32 #@param ["8", "16", "32", "54", "128", "256", "512"] {type:"raw"}
 
     set_seed(0)
-    train_df_sample = pd.concat([train_df[train_df[1]==0].sample(num_training), train_df[train_df[1]==1].sample(num_training)])
-    # train_df_sample = train_df
+    # train_df_sample = pd.concat([train_df[train_df[1]==0].sample(num_training), train_df[train_df[1]==1].sample(num_training)])
+    train_df_sample = train_df
     x_train = train_df_sample[text_col].values.tolist()
     y_train = train_df_sample[category_col].values.tolist()
 
