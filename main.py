@@ -121,10 +121,19 @@ def main():
         # exit()
         # for c in range(num_classes):
         #     print('class c = %d: %d real images'%(c, len(indices_class[c])))
+        indices_class = [[] for c in range(num_classes_text)]
+        labels_all = y_train
+        for i, lab in enumerate(labels_all):
+            indices_class[lab].append(i)
+
 
         # def get_images(c, n): # get random n images from class c
         #     idx_shuffle = np.random.permutation(indices_class[c])[:n]
         #     return images_all[idx_shuffle]
+
+        def get_sentences(c, n):
+            idx_shuffle = np.random.permutation(indices_class[c])[:n]
+            return X_train_noFT[idx_shuffle]
 
         # for ch in range(channel):
         #     print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
@@ -137,22 +146,15 @@ def main():
         text_syn = torch.randn(size=(num_classes_text*args.ipc, 768), dtype=torch.float, requires_grad=True, device=args.device)
         # label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.float, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
         label_text_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes_text)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
-        # if args.init == 'real':
-        #     print('initialize synthetic data from random real images')
-        #     for c in range(num_classes):
-        #         image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
-        # else:
-        #     print('initialize synthetic data from random noise')
-        indices_class = [[] for c in range(num_classes_text)]
-        labels_all = y_train
-        for i, lab in enumerate(labels_all):
-            indices_class[lab].append(i)
+        if args.init == 'real':
+            print('initialize synthetic data from random real images')
+            for c in range(num_classes_text):
+                text_syn.data[c*args.ipc:(c+1)*args.ipc] = get_sentences(c, args.ipc).detach().data
+        else:
+            print('initialize synthetic data from random noise')
 
         # print(X_train_noFT.shape)
         # exit()
-        def get_sentences(c, n):
-            idx_shuffle = np.random.permutation(indices_class[c])[:n]
-            return X_train_noFT[idx_shuffle]
 
         ''' training '''
         # optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
